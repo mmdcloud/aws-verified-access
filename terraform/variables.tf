@@ -5,5 +5,10 @@ variable "region" {
 
 variable "instance_name" {
   type    = string
-  default = "verified-access-instance"  
+  default = "verified-access-instance"
+}
+
+variable "domain_name" {
+  type    = string
+  default = "mohitcloud.xyz"
 }
