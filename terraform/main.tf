@@ -2,162 +2,79 @@
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
 module "vpc" {
-  source                = "./modules/vpc/vpc"
-  vpc_name              = "vpc"
-  vpc_cidr_block        = "10.0.0.0/16"
-  enable_dns_hostnames  = true
-  enable_dns_support    = true
-  internet_gateway_name = "vpc-igw"
-}
-
-module "lb_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "lb-sg"
-  ingress = [
-    {
-      from_port       = 80
-      to_port         = 80
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "HTTP traffic"
-    },
-    {
-      from_port       = 443
-      to_port         = 443
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = ["0.0.0.0/0"]
-      security_groups = []
-      description     = "HTTPS traffic"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
-module "asg_sg" {
-  source = "./modules/vpc/security_groups"
-  vpc_id = module.vpc.vpc_id
-  name   = "asg-sg"
-  ingress = [
-    {
-      from_port       = 80
-      to_port         = 80
-      protocol        = "tcp"
-      self            = "false"
-      cidr_blocks     = []
-      security_groups = [module.lb_sg.id]
-      description     = "any"
-    }
-  ]
-  egress = [
-    {
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  ]
-}
-
-module "public_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "public-subnet"
-  subnets = [
-    {
-      subnet = "10.0.1.0/24"
-      az     = "${var.region}a"
-    },
-    {
-      subnet = "10.0.2.0/24"
-      az     = "${var.region}b"
-    },
-    {
-      subnet = "10.0.3.0/24"
-      az     = "${var.region}c"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
+  source                  = "./modules/vpc"
+  vpc_name                = "vpc"
+  vpc_cidr                = "10.0.0.0/16"
+  azs                     = var.azs
+  public_subnets          = var.public_subnets
+  private_subnets         = var.private_subnets
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
+  create_igw              = true
   map_public_ip_on_launch = true
-}
-
-module "private_subnets" {
-  source = "./modules/vpc/subnets"
-  name   = "private-subnet"
-  subnets = [
-    {
-      subnet = "10.0.4.0/24"
-      az     = "${var.region}a"
-    },
-    {
-      subnet = "10.0.5.0/24"
-      az     = "${var.region}b"
-    },
-    {
-      subnet = "10.0.6.0/24"
-      az     = "${var.region}c"
-    }
-  ]
-  vpc_id                  = module.vpc.vpc_id
-  map_public_ip_on_launch = false
-}
-
-module "public_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "public-route-table"
-  subnets = module.public_subnets.subnets[*]
-  routes = [
-    {
-      cidr_block     = "0.0.0.0/0"
-      gateway_id     = module.vpc.igw_id
-      nat_gateway_id = ""
-    }
-  ]
-  vpc_id = module.vpc.vpc_id
-}
-
-# Elastic IP for NAT Gateway
-resource "aws_eip" "nat" {
-  domain = "vpc"
-
+  enable_nat_gateway      = true
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
-    Name = "nat-gateway-eip"
+    Project = "nodeapp"
   }
 }
 
-# NAT Gateway in first public subnet
-resource "aws_nat_gateway" "nat_gateway" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = module.public_subnets.subnets[0].id
+resource "aws_security_group" "lb_sg" {
+  name   = "lb-sg"
+  vpc_id = module.vpc.vpc_id
 
-  tags = {
-    Name = "main-nat-gateway"
+  ingress {
+    description = "HTTP traffic"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  depends_on = [module.vpc]
+  ingress {
+    description = "HTTPS traffic"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "lb-sg"
+  }
 }
 
-module "private_rt" {
-  source  = "./modules/vpc/route_tables"
-  name    = "private-route-table"
-  subnets = module.private_subnets.subnets[*]
-  routes = [
-    {
-      cidr_block     = "0.0.0.0/0"
-      gateway_id     = ""
-      nat_gateway_id = aws_nat_gateway.nat_gateway.id
-    }
-  ]
+resource "aws_security_group" "asg_sg" {
+  name   = "asg-sg"
   vpc_id = module.vpc.vpc_id
+
+  ingress {
+    description     = "HTTP traffic"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    cidr_blocks     = []
+    security_groups = [aws_security_group.lb_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "asg-sg"
+  }
 }
 
 # -------------------------------------------------------------------------------
@@ -213,7 +130,7 @@ module "asg" {
   health_check_type         = "ELB"
   force_delete              = true
   target_group_arns         = [module.lb.target_groups[0].arn]
-  vpc_zone_identifier       = module.private_subnets.subnets[*].id
+  vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
   launch_template_version   = "$Latest"
 }
@@ -229,7 +146,7 @@ module "lb" {
   load_balancer_type         = "application"
   enable_deletion_protection = false
   security_groups            = [module.lb_sg.id]
-  subnets                    = module.public_subnets.subnets[*].id
+  subnets                    = module.vpc.public_subnets
   target_groups = [
     {
       target_group_name                = "tg"
@@ -330,7 +247,7 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
     load_balancer_arn = module.lb.arn
     port              = 80
     protocol          = "http"
-    subnet_ids        = module.public_subnets.subnets[*].id
+    subnet_ids        = module.vpc.public_subnets
   }
 
   security_group_ids       = [module.lb_sg.id]
