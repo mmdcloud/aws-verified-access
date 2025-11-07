@@ -80,6 +80,32 @@ resource "aws_security_group" "asg_sg" {
 # -------------------------------------------------------------------------------
 # Auto Scaling Group
 # -------------------------------------------------------------------------------
+module "lb_logs" {
+  source        = "./modules/s3"
+  bucket_name   = "lb-logs"
+  objects       = []
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    },
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["PUT"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+# -------------------------------------------------------------------------------
+# Auto Scaling Group
+# -------------------------------------------------------------------------------
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
   assume_role_policy = jsonencode({
@@ -139,44 +165,50 @@ module "asg" {
 # Load Balancer
 # -------------------------------------------------------------------------------
 module "lb" {
-  source                     = "./modules/load-balancer"
-  lb_name                    = "lb"
-  lb_is_internal             = false
-  lb_ip_address_type         = "ipv4"
+  source                     = "terraform-aws-modules/alb/aws"
+  name                       = "lb"
   load_balancer_type         = "application"
-  enable_deletion_protection = false
-  security_groups            = [module.lb_sg.id]
+  vpc_id                     = module.vpc.vpc_id
   subnets                    = module.vpc.public_subnets
-  target_groups = [
-    {
-      target_group_name                = "tg"
-      target_port                      = 80
-      target_ip_address_type           = "ipv4"
-      target_protocol                  = "HTTP"
-      target_type                      = "instance"
-      target_vpc_id                    = module.vpc.vpc_id
-      health_check_interval            = 30
-      health_check_path                = "/"
-      health_check_enabled             = true
-      health_check_protocol            = "HTTP"
-      health_check_timeout             = 5
-      health_check_healthy_threshold   = 3
-      health_check_unhealthy_threshold = 3
-      health_check_port                = 80
-    }
+  enable_deletion_protection = false
+  drop_invalid_header_fields = true
+  ip_address_type            = "ipv4"
+  internal                   = false
+  security_groups = [
+    aws_security_group.lb_sg.id
   ]
-  listeners = [
-    {
-      listener_port     = 80
-      listener_protocol = "HTTP"
-      default_actions = [
-        {
-          type             = "forward"
-          target_group_arn = module.lb.target_groups[0].arn
-        }
-      ]
+  access_logs = {
+    bucket = "${module.lb_logs.bucket}"
+  }
+  listeners = {
+    lb_http_listener = {
+      port     = 80
+      protocol = "HTTP"
+      forward = {
+        target_group_key = "lb_target_group"
+      }
     }
-  ]
+  }
+  target_groups = {
+    lb_target_group = {
+      backend_protocol = "HTTP"
+      backend_port     = 80
+      target_type      = "ip"
+      health_check = {
+        enabled             = true
+        healthy_threshold   = 3
+        interval            = 30
+        path                = "/"
+        port                = 80
+        protocol            = "HTTP"
+        unhealthy_threshold = 3
+      }
+      create_attachment = false
+    }
+  }
+  tags = {
+    Project = "verified-access"
+  }
 }
 
 # -------------------------------------------------------------------------------
