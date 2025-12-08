@@ -80,32 +80,6 @@ resource "aws_security_group" "asg_sg" {
 # -------------------------------------------------------------------------------
 # Auto Scaling Group
 # -------------------------------------------------------------------------------
-module "lb_logs" {
-  source        = "./modules/s3"
-  bucket_name   = "lb-logs"
-  objects       = []
-  bucket_policy = ""
-  cors = [
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["GET"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    },
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["PUT"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    }
-  ]
-  versioning_enabled = "Enabled"
-  force_destroy      = true
-}
-
-# -------------------------------------------------------------------------------
-# Auto Scaling Group
-# -------------------------------------------------------------------------------
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
   assume_role_policy = jsonencode({
@@ -164,6 +138,30 @@ module "asg" {
 # -------------------------------------------------------------------------------
 # Load Balancer
 # -------------------------------------------------------------------------------
+module "lb_logs" {
+  source        = "./modules/s3"
+  bucket_name   = "lb-logs"
+  objects       = []
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    },
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["PUT"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+
 module "lb" {
   source                     = "terraform-aws-modules/alb/aws"
   name                       = "lb"
