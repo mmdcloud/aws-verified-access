@@ -1,3 +1,7 @@
+resource "random_id" "id" {
+  byte_length = 8
+}
+
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
@@ -113,7 +117,7 @@ module "launch_template" {
   network_interfaces = [
     {
       associate_public_ip_address = false
-      security_groups             = [module.asg_sg.id]
+      security_groups             = [aws_security_group.asg_sg.id]
     }
   ]
   user_data = base64encode(templatefile("${path.module}/scripts/user_data.sh", {}))
@@ -129,7 +133,7 @@ module "asg" {
   health_check_grace_period = 300
   health_check_type         = "ELB"
   force_delete              = true
-  target_group_arns         = [module.lb.target_groups[0].arn]
+  target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
   launch_template_version   = "$Latest"
@@ -140,7 +144,8 @@ module "asg" {
 # -------------------------------------------------------------------------------
 module "lb_logs" {
   source        = "./modules/s3"
-  bucket_name   = "lb-logs"
+  bucket_name   = "lb-logs-${random_id.id.hex}"
+  region        = var.region
   objects       = []
   bucket_policy = ""
   cors = [
@@ -191,7 +196,7 @@ module "lb" {
     lb_target_group = {
       backend_protocol = "HTTP"
       backend_port     = 80
-      target_type      = "ip"
+      target_type      = "instance"
       health_check = {
         enabled             = true
         healthy_threshold   = 3
@@ -241,7 +246,7 @@ resource "aws_verifiedaccess_instance" "instance" {
 # AWS Verified Access Trust Provider
 # -------------------------------------------------------------------------------
 resource "aws_verifiedaccess_trust_provider" "trust_provider" {
-  policy_reference_name    = "trust-provider"
+  policy_reference_name    = "trustprovider"
   trust_provider_type      = "user"
   user_trust_provider_type = "iam-identity-center"
 }
@@ -260,6 +265,9 @@ resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
 resource "aws_verifiedaccess_group" "group" {
   description                = "verified-access-group"
   verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
+  depends_on = [
+    aws_verifiedaccess_instance_trust_provider_attachment.attachment
+  ]
 }
 
 # -------------------------------------------------------------------------------
@@ -280,6 +288,6 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
     subnet_ids        = module.vpc.public_subnets
   }
 
-  security_group_ids       = [module.lb_sg.id]
+  security_group_ids       = [aws_security_group.lb_sg.id]
   verified_access_group_id = aws_verifiedaccess_group.group.id
 }

@@ -1,5 +1,8 @@
 variable "bucket_name" {}
 variable "force_destroy" {}
+variable "region" {
+  type    = string  
+}
 variable "versioning_enabled" {}
 variable "objects" {
   type = list(object({
