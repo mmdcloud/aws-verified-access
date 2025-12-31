@@ -1,5 +1,12 @@
+data "aws_ssoadmin_instances" "main" {}
+
 resource "random_id" "id" {
   byte_length = 8
+}
+
+data "aws_route53_zone" "main" {
+  name         = var.domain_name
+  private_zone = false
 }
 
 # -----------------------------------------------------------------------------------------
@@ -17,65 +24,72 @@ module "vpc" {
   create_igw              = true
   map_public_ip_on_launch = true
   enable_nat_gateway      = true
-  single_nat_gateway      = false
-  one_nat_gateway_per_az  = true
+  single_nat_gateway      = true
+  one_nat_gateway_per_az  = false
   tags = {
     Project = "nodeapp"
   }
 }
 
-resource "aws_security_group" "lb_sg" {
+module "lb_sg" {
+  source = "./modules/security-groups"
   name   = "lb-sg"
   vpc_id = module.vpc.vpc_id
-
-  ingress {
-    description = "HTTP traffic"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTPS traffic"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    },
+    {
+      description     = "HTTPS Traffic"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      security_groups = []
+      cidr_blocks     = ["0.0.0.0/0"]
+    }
+  ]
+  egress_rules = [
+    {
+      description = "Allow all outbound traffic"
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
   tags = {
     Name = "lb-sg"
   }
 }
 
-resource "aws_security_group" "asg_sg" {
+module "asg_sg" {
+  source = "./modules/security-groups"
   name   = "asg-sg"
   vpc_id = module.vpc.vpc_id
-
-  ingress {
-    description     = "HTTP traffic"
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
-    cidr_blocks     = []
-    security_groups = [aws_security_group.lb_sg.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
+  ingress_rules = [
+    {
+      description     = "HTTP Traffic"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      security_groups = [module.lb_sg.id]
+      cidr_blocks     = []
+    }
+  ]
+  egress_rules = [
+    {
+      description = "Allow all outbound traffic"
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  ]
   tags = {
     Name = "asg-sg"
   }
@@ -117,7 +131,7 @@ module "launch_template" {
   network_interfaces = [
     {
       associate_public_ip_address = false
-      security_groups             = [aws_security_group.asg_sg.id]
+      security_groups             = [module.asg_sg.id]
     }
   ]
   user_data = base64encode(templatefile("${path.module}/scripts/user_data.sh", {}))
@@ -166,7 +180,6 @@ module "lb_logs" {
   force_destroy      = true
 }
 
-
 module "lb" {
   source                     = "terraform-aws-modules/alb/aws"
   name                       = "lb"
@@ -178,7 +191,7 @@ module "lb" {
   ip_address_type            = "ipv4"
   internal                   = false
   security_groups = [
-    aws_security_group.lb_sg.id
+    module.lb_sg.id
   ]
   access_logs = {
     bucket = "${module.lb_logs.bucket}"
@@ -218,10 +231,10 @@ module "lb" {
 # ACM Certificate
 # -------------------------------------------------------------------------------
 resource "aws_acm_certificate" "acm_certificate" {
-  domain_name       = "mohitcloud.xyz"
+  domain_name       = var.domain_name
   validation_method = "DNS"
 
-  subject_alternative_names = ["*.mohitcloud.xyz", "secure.mohitcloud.xyz"]
+  subject_alternative_names = ["*.${var.domain_name}", "secure.${var.domain_name}"]
 
   lifecycle {
     create_before_destroy = true
@@ -230,6 +243,28 @@ resource "aws_acm_certificate" "acm_certificate" {
   tags = {
     Name = "mohitcloud-certificate"
   }
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.acm_certificate.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = data.aws_route53_zone.main.zone_id
+}
+
+resource "aws_acm_certificate_validation" "cert" {
+  certificate_arn         = aws_acm_certificate.acm_certificate.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
 
 # -------------------------------------------------------------------------------
@@ -248,7 +283,13 @@ resource "aws_verifiedaccess_instance" "instance" {
 resource "aws_verifiedaccess_trust_provider" "trust_provider" {
   policy_reference_name    = "trustprovider"
   trust_provider_type      = "user"
-  user_trust_provider_type = "iam-identity-center"
+  user_trust_provider_type = "iam-identity-center" 
+  oidc_options {
+    issuer = "https://portal.sso.${var.region}.amazonaws.com/saml/assertion/${data.aws_ssoadmin_instances.main.identity_store_ids[0]}"
+  }  
+  tags = {
+    Name = "iam-identity-center-trust-provider"
+  }
 }
 
 # -------------------------------------------------------------------------------
@@ -265,6 +306,25 @@ resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
 resource "aws_verifiedaccess_group" "group" {
   description                = "verified-access-group"
   verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowAuthenticatedUsers"
+        Effect = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "verified-access:Connect"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "context:identity:authenticated" = "true"
+          }
+        }
+      }
+    ]
+  })
   depends_on = [
     aws_verifiedaccess_instance_trust_provider_attachment.attachment
   ]
@@ -277,10 +337,9 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
   application_domain     = var.domain_name
   attachment_type        = "vpc"
   description            = "Verified Access Endpoint"
-  domain_certificate_arn = aws_acm_certificate.acm_certificate.arn
+  domain_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
   endpoint_domain_prefix = "secure"
   endpoint_type          = "load-balancer"
-
   load_balancer_options {
     load_balancer_arn = module.lb.arn
     port              = 80
@@ -288,6 +347,6 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
     subnet_ids        = module.vpc.public_subnets
   }
 
-  security_group_ids       = [aws_security_group.lb_sg.id]
+  security_group_ids       = [module.lb_sg.id]
   verified_access_group_id = aws_verifiedaccess_group.group.id
 }
