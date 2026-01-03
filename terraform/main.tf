@@ -24,8 +24,8 @@ module "vpc" {
   create_igw              = true
   map_public_ip_on_launch = true
   enable_nat_gateway      = true
-  single_nat_gateway      = true
-  one_nat_gateway_per_az  = false
+  single_nat_gateway      = false
+  one_nat_gateway_per_az  = true
   tags = {
     Project = "nodeapp"
   }
@@ -277,16 +277,34 @@ resource "aws_verifiedaccess_instance" "instance" {
   }
 }
 
+resource "aws_ssoadmin_application" "verified_access" {
+  application_provider_arn = "arn:aws:sso::aws:applicationProvider/custom"
+  instance_arn             = tolist(data.aws_ssoadmin_instances.main.arns)[0]
+  name                     = "Verified Access Application"
+  description              = "Application for AWS Verified Access"
+  
+  portal_options {
+    sign_in_options {
+      origin = "APPLICATION"
+      application_url = "https://secure.${var.domain_name}"
+    }
+  }
+}
+
+# Assign users/groups to the application
+resource "aws_ssoadmin_application_assignment" "verified_access" {
+  application_arn = aws_ssoadmin_application.verified_access.application_arn
+  principal_id    = var.identity_center_group_id
+  principal_type  = "GROUP"
+}
+
 # -------------------------------------------------------------------------------
 # AWS Verified Access Trust Provider
 # -------------------------------------------------------------------------------
 resource "aws_verifiedaccess_trust_provider" "trust_provider" {
   policy_reference_name    = "trustprovider"
   trust_provider_type      = "user"
-  user_trust_provider_type = "iam-identity-center" 
-  oidc_options {
-    issuer = "https://portal.sso.${var.region}.amazonaws.com/saml/assertion/${data.aws_ssoadmin_instances.main.identity_store_ids[0]}"
-  }  
+  user_trust_provider_type = "iam-identity-center"
   tags = {
     Name = "iam-identity-center-trust-provider"
   }
@@ -310,16 +328,17 @@ resource "aws_verifiedaccess_group" "group" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AllowAuthenticatedUsers"
-        Effect = "Allow"
-        Principal = {
-          AWS = "*"
-        }
-        Action   = "verified-access:Connect"
-        Resource = "*"
+        Sid       = "AllowSpecificEmailDomain"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "verified-access:allow"
+        Resource  = "*"
         Condition = {
+          StringLike = {
+            "verified-access:user:email" = "*@yourdomain.com"
+          }
           StringEquals = {
-            "context:identity:authenticated" = "true"
+            "verified-access:user:authenticated" = "true"
           }
         }
       }
