@@ -1,5 +1,7 @@
 data "aws_ssoadmin_instances" "main" {}
 
+data "aws_elb_service_account" "main" {}
+
 resource "random_id" "id" {
   byte_length = 8
 }
@@ -157,11 +159,42 @@ module "asg" {
 # Load Balancer
 # -------------------------------------------------------------------------------
 module "lb_logs" {
-  source        = "./modules/s3"
-  bucket_name   = "lb-logs-${random_id.id.hex}"
-  region        = var.region
-  objects       = []
-  bucket_policy = ""
+  source      = "./modules/s3"
+  bucket_name = "lb-logs-${random_id.id.hex}"
+  region      = var.region
+  objects     = []
+  bucket_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSLogDeliveryWrite"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}/*"
+      },
+      {
+        Sid    = "AWSLogDeliveryAclCheck"
+        Effect = "Allow"
+        Principal = {
+          Service = "logging.s3.amazonaws.com"
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}"
+      },
+      {
+        Sid    = "AWSELBAccountWrite"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_elb_service_account.main.id}:root"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}/*"
+      }
+    ]
+  })
   cors = [
     {
       allowed_headers = ["*"]
@@ -189,7 +222,7 @@ module "lb" {
   enable_deletion_protection = false
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
-  internal                   = false
+  internal                   = true
   security_groups = [
     module.lb_sg.id
   ]
@@ -228,20 +261,104 @@ module "lb" {
 }
 
 # -------------------------------------------------------------------------------
+# AWS Verified Access Instance
+# -------------------------------------------------------------------------------
+resource "aws_verifiedaccess_instance" "instance" {
+  description = var.instance_name
+  tags = {
+    Name = var.instance_name
+  }
+}
+
+# resource "aws_ssoadmin_application" "verified_access" {
+#   application_provider_arn = "arn:aws:sso::aws:applicationProvider/custom"
+#   instance_arn             = tolist(data.aws_ssoadmin_instances.main.arns)[0]
+#   name                     = "Verified Access Application"
+#   description              = "Application for AWS Verified Access"
+
+#   portal_options {
+#     sign_in_options {
+#       origin          = "APPLICATION"
+#       application_url = "https://secure.${var.domain_name}"
+#     }
+#   }
+# }
+
+# resource "aws_identitystore_user" "identity_store" {
+#   identity_store_id = tolist(data.aws_ssoadmin_instances.main.identity_store_ids)[0]
+#   display_name      = "John Doe"
+#   user_name         = "johndoe"
+#   name {
+#     given_name  = "John"
+#     family_name = "Doe"
+#   }
+#   emails {
+#     value = "mohitfury1997@gmail.com"
+#   }
+# }
+
+# # Assign users/groups to the application
+# resource "aws_ssoadmin_application_assignment" "verified_access" {
+#   application_arn = aws_ssoadmin_application.verified_access.application_arn
+#   principal_id    = aws_identitystore_user.identity_store.id
+#   principal_type  = "USER"
+# }
+
+# -------------------------------------------------------------------------------
+# AWS Verified Access Trust Provider
+# -------------------------------------------------------------------------------
+resource "aws_verifiedaccess_trust_provider" "trust_provider" {
+  policy_reference_name    = "trustprovider"
+  trust_provider_type      = "user"
+  user_trust_provider_type = "iam-identity-center"
+
+  tags = {
+    Name = "iam-identity-center-trust-provider"
+  }
+}
+
+# -------------------------------------------------------------------------------
+# Trust Provider Attachment
+# -------------------------------------------------------------------------------
+resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
+  verifiedaccess_instance_id       = aws_verifiedaccess_instance.instance.id
+  verifiedaccess_trust_provider_id = aws_verifiedaccess_trust_provider.trust_provider.id
+}
+
+# -------------------------------------------------------------------------------
+# AWS Verified Access Group
+# -------------------------------------------------------------------------------
+resource "aws_verifiedaccess_group" "group" {
+  description                = "verified-access-group"
+  verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
+  policy_document = <<-EOT
+    permit(principal, action, resource)
+    when {
+      context.trustprovider.user.email.verified == true &&
+      context.trustprovider.user.email.address like "*@${var.domain_name}"
+    };
+  EOT
+  depends_on = [
+    aws_verifiedaccess_instance_trust_provider_attachment.attachment
+  ]
+}
+
+# -------------------------------------------------------------------------------
 # ACM Certificate
 # -------------------------------------------------------------------------------
 resource "aws_acm_certificate" "acm_certificate" {
-  domain_name       = var.domain_name
+  domain_name       = "secure.${var.domain_name}"  # ✅ Match your actual endpoint
   validation_method = "DNS"
 
-  subject_alternative_names = ["*.${var.domain_name}", "secure.${var.domain_name}"]
+  # You can add the wildcard as a SAN if you want to use other subdomains later
+  subject_alternative_names = ["*.${var.domain_name}"]
 
   lifecycle {
     create_before_destroy = true
   }
 
   tags = {
-    Name = "mohitcloud-certificate"
+    Name = "${var.domain_name}-certificate"
   }
 }
 
@@ -268,97 +385,16 @@ resource "aws_acm_certificate_validation" "cert" {
 }
 
 # -------------------------------------------------------------------------------
-# AWS Verified Access Instance
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_instance" "instance" {
-  description = var.instance_name
-  tags = {
-    Name = var.instance_name
-  }
-}
-
-resource "aws_ssoadmin_application" "verified_access" {
-  application_provider_arn = "arn:aws:sso::aws:applicationProvider/custom"
-  instance_arn             = tolist(data.aws_ssoadmin_instances.main.arns)[0]
-  name                     = "Verified Access Application"
-  description              = "Application for AWS Verified Access"
-  
-  portal_options {
-    sign_in_options {
-      origin = "APPLICATION"
-      application_url = "https://secure.${var.domain_name}"
-    }
-  }
-}
-
-# Assign users/groups to the application
-resource "aws_ssoadmin_application_assignment" "verified_access" {
-  application_arn = aws_ssoadmin_application.verified_access.application_arn
-  principal_id    = var.identity_center_group_id
-  principal_type  = "GROUP"
-}
-
-# -------------------------------------------------------------------------------
-# AWS Verified Access Trust Provider
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_trust_provider" "trust_provider" {
-  policy_reference_name    = "trustprovider"
-  trust_provider_type      = "user"
-  user_trust_provider_type = "iam-identity-center"
-  tags = {
-    Name = "iam-identity-center-trust-provider"
-  }
-}
-
-# -------------------------------------------------------------------------------
-# Trust Provider Attachment
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
-  verifiedaccess_instance_id       = aws_verifiedaccess_instance.instance.id
-  verifiedaccess_trust_provider_id = aws_verifiedaccess_trust_provider.trust_provider.id
-}
-
-# -------------------------------------------------------------------------------
-# AWS Verified Access Group
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_group" "group" {
-  description                = "verified-access-group"
-  verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
-  policy_document = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowSpecificEmailDomain"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "verified-access:allow"
-        Resource  = "*"
-        Condition = {
-          StringLike = {
-            "verified-access:user:email" = "*@yourdomain.com"
-          }
-          StringEquals = {
-            "verified-access:user:authenticated" = "true"
-          }
-        }
-      }
-    ]
-  })
-  depends_on = [
-    aws_verifiedaccess_instance_trust_provider_attachment.attachment
-  ]
-}
-
-# -------------------------------------------------------------------------------
 # AWS Verified Access Endpoint
 # -------------------------------------------------------------------------------
 resource "aws_verifiedaccess_endpoint" "endpoint" {
-  application_domain     = var.domain_name
+  application_domain     = "secure.${var.domain_name}"  # ✅ Full domain name
   attachment_type        = "vpc"
   description            = "Verified Access Endpoint"
   domain_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
-  endpoint_domain_prefix = "secure"
+  endpoint_domain_prefix = "secure"  # This creates the AWS-managed domain
   endpoint_type          = "load-balancer"
+  
   load_balancer_options {
     load_balancer_arn = module.lb.arn
     port              = 80
@@ -368,4 +404,16 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
 
   security_group_ids       = [module.lb_sg.id]
   verified_access_group_id = aws_verifiedaccess_group.group.id
+
+  depends_on = [aws_acm_certificate_validation.cert]
+}
+
+resource "aws_route53_record" "verified_access" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "secure.${var.domain_name}"
+  type    = "CNAME"
+  ttl     = 300
+  records = [aws_verifiedaccess_endpoint.endpoint.endpoint_domain]
+
+  depends_on = [aws_verifiedaccess_endpoint.endpoint]
 }
