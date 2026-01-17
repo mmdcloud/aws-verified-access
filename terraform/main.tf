@@ -218,7 +218,7 @@ module "lb" {
   name                       = "lb"
   load_balancer_type         = "application"
   vpc_id                     = module.vpc.vpc_id
-  subnets                    = module.vpc.public_subnets
+  subnets                    = module.vpc.private_subnets
   enable_deletion_protection = false
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
@@ -331,7 +331,7 @@ resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
 resource "aws_verifiedaccess_group" "group" {
   description                = "verified-access-group"
   verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
-  policy_document = <<-EOT
+  policy_document            = <<-EOT
     permit(principal, action, resource)
     when {
       context.trustprovider.user.email.verified == true &&
@@ -347,7 +347,7 @@ resource "aws_verifiedaccess_group" "group" {
 # ACM Certificate
 # -------------------------------------------------------------------------------
 resource "aws_acm_certificate" "acm_certificate" {
-  domain_name       = "secure.${var.domain_name}"  # ✅ Match your actual endpoint
+  domain_name       = "secure.${var.domain_name}" # ✅ Match your actual endpoint
   validation_method = "DNS"
 
   # You can add the wildcard as a SAN if you want to use other subdomains later
@@ -388,18 +388,18 @@ resource "aws_acm_certificate_validation" "cert" {
 # AWS Verified Access Endpoint
 # -------------------------------------------------------------------------------
 resource "aws_verifiedaccess_endpoint" "endpoint" {
-  application_domain     = "secure.${var.domain_name}"  # ✅ Full domain name
+  application_domain     = "secure.${var.domain_name}"
   attachment_type        = "vpc"
   description            = "Verified Access Endpoint"
   domain_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
-  endpoint_domain_prefix = "secure"  # This creates the AWS-managed domain
+  endpoint_domain_prefix = "secure"
   endpoint_type          = "load-balancer"
-  
+
   load_balancer_options {
     load_balancer_arn = module.lb.arn
     port              = 80
     protocol          = "http"
-    subnet_ids        = module.vpc.public_subnets
+    subnet_ids        = module.vpc.private_subnets
   }
 
   security_group_ids       = [module.lb_sg.id]
