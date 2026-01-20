@@ -270,40 +270,6 @@ resource "aws_verifiedaccess_instance" "instance" {
   }
 }
 
-# resource "aws_ssoadmin_application" "verified_access" {
-#   application_provider_arn = "arn:aws:sso::aws:applicationProvider/custom"
-#   instance_arn             = tolist(data.aws_ssoadmin_instances.main.arns)[0]
-#   name                     = "Verified Access Application"
-#   description              = "Application for AWS Verified Access"
-
-#   portal_options {
-#     sign_in_options {
-#       origin          = "APPLICATION"
-#       application_url = "https://secure.${var.domain_name}"
-#     }
-#   }
-# }
-
-# resource "aws_identitystore_user" "identity_store" {
-#   identity_store_id = tolist(data.aws_ssoadmin_instances.main.identity_store_ids)[0]
-#   display_name      = "John Doe"
-#   user_name         = "johndoe"
-#   name {
-#     given_name  = "John"
-#     family_name = "Doe"
-#   }
-#   emails {
-#     value = "mohitfury1997@gmail.com"
-#   }
-# }
-
-# # Assign users/groups to the application
-# resource "aws_ssoadmin_application_assignment" "verified_access" {
-#   application_arn = aws_ssoadmin_application.verified_access.application_arn
-#   principal_id    = aws_identitystore_user.identity_store.id
-#   principal_type  = "USER"
-# }
-
 # -------------------------------------------------------------------------------
 # AWS Verified Access Trust Provider
 # -------------------------------------------------------------------------------
