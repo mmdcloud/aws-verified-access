@@ -301,7 +301,7 @@ resource "aws_verifiedaccess_group" "group" {
     permit(principal, action, resource)
     when {
       context.trustprovider.user.email.verified == true &&
-      context.trustprovider.user.email.address like "*@${var.domain_name}"
+      context.trustprovider.user.email.address like "*@*"
     };
   EOT
   depends_on = [
@@ -313,7 +313,7 @@ resource "aws_verifiedaccess_group" "group" {
 # ACM Certificate
 # -------------------------------------------------------------------------------
 resource "aws_acm_certificate" "acm_certificate" {
-  domain_name       = "secure.${var.domain_name}" # ✅ Match your actual endpoint
+  domain_name       = "secure.${var.domain_name}"
   validation_method = "DNS"
 
   # You can add the wildcard as a SAN if you want to use other subdomains later
