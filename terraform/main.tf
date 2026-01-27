@@ -1,6 +1,4 @@
-data "aws_ssoadmin_instances" "main" {}
-
-data "aws_elb_service_account" "main" {}
+data "aws_elb_service_account" "elb_service_account" {}
 
 resource "random_id" "id" {
   byte_length = 8
@@ -188,7 +186,7 @@ module "lb_logs" {
         Sid    = "AWSELBAccountWrite"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:aws:iam::${data.aws_elb_service_account.main.id}:root"
+          AWS = "arn:aws:iam::${data.aws_elb_service_account.elb_service_account.id}:root"
         }
         Action   = "s3:PutObject"
         Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}/*"
