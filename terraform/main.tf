@@ -259,125 +259,189 @@ module "lb" {
 }
 
 # -------------------------------------------------------------------------------
-# AWS Verified Access Instance
+# ACM Certificate
 # -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_instance" "instance" {
-  description = var.instance_name
+module "acm_certificate" {
+  source                    = "./modules/acm"
+  domain_name               = "secure.${var.domain_name}"
+  validation_method         = "DNS"
+  subject_alternative_names = ["*.${var.domain_name}"]
+  route53_zone_id           = data.aws_route53_zone.main.zone_id
+  create_validation_records = true
+  wait_for_validation       = true
+  validation_record_ttl     = 60
   tags = {
-    Name = var.instance_name
+    Name = "${var.domain_name}-certificate"
   }
 }
 
 # -------------------------------------------------------------------------------
-# AWS Verified Access Trust Provider
+# AWS Verified Access
 # -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_trust_provider" "trust_provider" {
-  policy_reference_name    = "trustprovider"
-  trust_provider_type      = "user"
-  user_trust_provider_type = "iam-identity-center"
-
-  tags = {
-    Name = "iam-identity-center-trust-provider"
-  }
-}
-
-# -------------------------------------------------------------------------------
-# Trust Provider Attachment
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
-  verifiedaccess_instance_id       = aws_verifiedaccess_instance.instance.id
-  verifiedaccess_trust_provider_id = aws_verifiedaccess_trust_provider.trust_provider.id
-}
-
-# -------------------------------------------------------------------------------
-# AWS Verified Access Group
-# -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_group" "group" {
-  description                = "verified-access-group"
-  verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
-  policy_document            = <<-EOT
+module "verified_access" {
+  source                               = "./modules/verified-access"
+  instance_name                        = var.instance_name
+  instance_description                 = var.instance_name
+  trust_provider_policy_reference_name = "trustprovider"
+  trust_provider_type                  = "user"
+  user_trust_provider_type             = "iam-identity-center"
+  trust_provider_name                  = "iam-identity-center-trust-provider"
+  group_description                    = "verified-access-group"
+  policy_document                      = <<-EOT
     permit(principal, action, resource)
     when {
       context.trustprovider.user.email.verified == true &&
       context.trustprovider.user.email.address like "*@*"
     };
   EOT
-  depends_on = [
-    aws_verifiedaccess_instance_trust_provider_attachment.attachment
-  ]
-}
-
-# -------------------------------------------------------------------------------
-# ACM Certificate
-# -------------------------------------------------------------------------------
-resource "aws_acm_certificate" "acm_certificate" {
-  domain_name       = "secure.${var.domain_name}"
-  validation_method = "DNS"
-
-  # You can add the wildcard as a SAN if you want to use other subdomains later
-  subject_alternative_names = ["*.${var.domain_name}"]
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
+  application_domain                   = "secure.${var.domain_name}"
+  attachment_type                      = "vpc"
+  endpoint_description                 = "Verified Access Endpoint"
+  domain_certificate_arn               = module.acm_certificate.certificate_arn
+  endpoint_domain_prefix               = "secure"
+  endpoint_type                        = "load-balancer"
+  load_balancer_arn                    = module.lb.arn
+  load_balancer_port                   = 80
+  load_balancer_protocol               = "http"
+  subnet_ids                           = module.vpc.private_subnets
+  security_group_ids                   = [module.lb_sg.id]
   tags = {
-    Name = "${var.domain_name}-certificate"
+    Project = "verified-access"
   }
-}
-
-resource "aws_route53_record" "cert_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.acm_certificate.domain_validation_options : dvo.domain_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
-
-  allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
-  ttl             = 60
-  type            = each.value.type
-  zone_id         = data.aws_route53_zone.main.zone_id
-}
-
-resource "aws_acm_certificate_validation" "cert" {
-  certificate_arn         = aws_acm_certificate.acm_certificate.arn
-  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
 
 # -------------------------------------------------------------------------------
-# AWS Verified Access Endpoint
+# Route53 DNS Record for Verified Access
 # -------------------------------------------------------------------------------
-resource "aws_verifiedaccess_endpoint" "endpoint" {
-  application_domain     = "secure.${var.domain_name}"
-  attachment_type        = "vpc"
-  description            = "Verified Access Endpoint"
-  domain_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
-  endpoint_domain_prefix = "secure"
-  endpoint_type          = "load-balancer"
-
-  load_balancer_options {
-    load_balancer_arn = module.lb.arn
-    port              = 80
-    protocol          = "http"
-    subnet_ids        = module.vpc.private_subnets
-  }
-
-  security_group_ids       = [module.lb_sg.id]
-  verified_access_group_id = aws_verifiedaccess_group.group.id
-
-  depends_on = [aws_acm_certificate_validation.cert]
-}
-
-resource "aws_route53_record" "verified_access" {
+module "verified_access_dns" {
+  source  = "./modules/route53"
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "secure.${var.domain_name}"
   type    = "CNAME"
   ttl     = 300
-  records = [aws_verifiedaccess_endpoint.endpoint.endpoint_domain]
-
-  depends_on = [aws_verifiedaccess_endpoint.endpoint]
+  records = [module.verified_access.endpoint_domain]
 }
+
+# -------------------------------------------------------------------------------
+# AWS Verified Access Instance
+# -------------------------------------------------------------------------------
+# resource "aws_verifiedaccess_instance" "instance" {
+#   description = var.instance_name
+#   tags = {
+#     Name = var.instance_name
+#   }
+# }
+
+# # -------------------------------------------------------------------------------
+# # AWS Verified Access Trust Provider
+# # -------------------------------------------------------------------------------
+# resource "aws_verifiedaccess_trust_provider" "trust_provider" {
+#   policy_reference_name    = "trustprovider"
+#   trust_provider_type      = "user"
+#   user_trust_provider_type = "iam-identity-center"
+
+#   tags = {
+#     Name = "iam-identity-center-trust-provider"
+#   }
+# }
+
+# # -------------------------------------------------------------------------------
+# # Trust Provider Attachment
+# # -------------------------------------------------------------------------------
+# resource "aws_verifiedaccess_instance_trust_provider_attachment" "attachment" {
+#   verifiedaccess_instance_id       = aws_verifiedaccess_instance.instance.id
+#   verifiedaccess_trust_provider_id = aws_verifiedaccess_trust_provider.trust_provider.id
+# }
+
+# # -------------------------------------------------------------------------------
+# # AWS Verified Access Group
+# # -------------------------------------------------------------------------------
+# resource "aws_verifiedaccess_group" "group" {
+#   description                = "verified-access-group"
+#   verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
+#   policy_document            = <<-EOT
+#     permit(principal, action, resource)
+#     when {
+#       context.trustprovider.user.email.verified == true &&
+#       context.trustprovider.user.email.address like "*@*"
+#     };
+#   EOT
+#   depends_on = [
+#     aws_verifiedaccess_instance_trust_provider_attachment.attachment
+#   ]
+# }
+
+# # -------------------------------------------------------------------------------
+# # ACM Certificate
+# # -------------------------------------------------------------------------------
+# resource "aws_acm_certificate" "acm_certificate" {
+#   domain_name       = "secure.${var.domain_name}"
+#   validation_method = "DNS"
+
+#   # You can add the wildcard as a SAN if you want to use other subdomains later
+#   subject_alternative_names = ["*.${var.domain_name}"]
+
+#   lifecycle {
+#     create_before_destroy = true
+#   }
+
+#   tags = {
+#     Name = "${var.domain_name}-certificate"
+#   }
+# }
+
+# resource "aws_route53_record" "cert_validation" {
+#   for_each = {
+#     for dvo in aws_acm_certificate.acm_certificate.domain_validation_options : dvo.domain_name => {
+#       name   = dvo.resource_record_name
+#       record = dvo.resource_record_value
+#       type   = dvo.resource_record_type
+#     }
+#   }
+
+#   allow_overwrite = true
+#   name            = each.value.name
+#   records         = [each.value.record]
+#   ttl             = 60
+#   type            = each.value.type
+#   zone_id         = data.aws_route53_zone.main.zone_id
+# }
+
+# resource "aws_acm_certificate_validation" "cert" {
+#   certificate_arn         = aws_acm_certificate.acm_certificate.arn
+#   validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+# }
+
+# # -------------------------------------------------------------------------------
+# # AWS Verified Access Endpoint
+# # -------------------------------------------------------------------------------
+# resource "aws_verifiedaccess_endpoint" "endpoint" {
+#   application_domain     = "secure.${var.domain_name}"
+#   attachment_type        = "vpc"
+#   description            = "Verified Access Endpoint"
+#   domain_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
+#   endpoint_domain_prefix = "secure"
+#   endpoint_type          = "load-balancer"
+
+#   load_balancer_options {
+#     load_balancer_arn = module.lb.arn
+#     port              = 80
+#     protocol          = "http"
+#     subnet_ids        = module.vpc.private_subnets
+#   }
+
+#   security_group_ids       = [module.lb_sg.id]
+#   verified_access_group_id = aws_verifiedaccess_group.group.id
+
+#   depends_on = [aws_acm_certificate_validation.cert]
+# }
+
+# resource "aws_route53_record" "verified_access" {
+#   zone_id = data.aws_route53_zone.main.zone_id
+#   name    = "secure.${var.domain_name}"
+#   type    = "CNAME"
+#   ttl     = 300
+#   records = [aws_verifiedaccess_endpoint.endpoint.endpoint_domain]
+
+#   depends_on = [aws_verifiedaccess_endpoint.endpoint]
+# }
