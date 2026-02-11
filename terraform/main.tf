@@ -14,7 +14,7 @@ data "aws_route53_zone" "main" {
 # -----------------------------------------------------------------------------------------
 module "vpc" {
   source                  = "./modules/vpc"
-  vpc_name                = "vpc"
+  vpc_name                = "verified-access-vpc"
   vpc_cidr                = "10.0.0.0/16"
   azs                     = var.azs
   public_subnets          = var.public_subnets
@@ -27,7 +27,7 @@ module "vpc" {
   single_nat_gateway      = false
   one_nat_gateway_per_az  = true
   tags = {
-    Project = "nodeapp"
+    Project = "verified-access-vpc"
   }
 }
 
