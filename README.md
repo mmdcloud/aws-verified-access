@@ -552,8 +552,11 @@ https://calculator.aws/
 <img width="1596" height="317" alt="Screenshot from 2026-02-22 10-53-46" src="https://github.com/user-attachments/assets/392c1f60-d179-4934-b0da-c14c81113a91" />
 <img width="1596" height="317" alt="Screenshot from 2026-02-22 10-53-58" src="https://github.com/user-attachments/assets/0a8db34f-f5bc-42af-95f7-50ce595bcf1b" />
 <img width="1596" height="317" alt="Screenshot from 2026-02-22 10-57-20" src="https://github.com/user-attachments/assets/67531251-d84b-4699-af9c-69bffba8f6b4" />
-[![Watch the demo](https://img.youtube.com/vi/mdl-Ztmxp_0/0.jpg)](https://www.youtube.com/watch?v=mdl-Ztmxp_0)
-
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=mdl-Ztmxp_0">
+    <img src="thumbnail.png" alt="Demo Video" width="700">
+  </a>
+</p>
 
 ## 📚 Additional Resources
 
