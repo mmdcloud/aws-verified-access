@@ -17,6 +17,7 @@ variable "ingress_rules" {
     protocol        = string
     security_groups = list(string)
     cidr_blocks     = list(string)
+    prefix_list_ids     = list(string)
   }))
   default = []
 }

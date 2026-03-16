@@ -11,6 +11,7 @@ resource "aws_security_group" "this" {
       protocol        = ingress.value.protocol
       security_groups = ingress.value.security_groups
       cidr_blocks     = ingress.value.cidr_blocks
+      prefix_list_ids = ingress.value.prefix_list_ids
     }
   }
 

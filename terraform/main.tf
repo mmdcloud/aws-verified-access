@@ -9,6 +9,10 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
+data "aws_ec2_managed_prefix_list" "verified_access" {
+  name = "com.amazonaws.${var.region}.verified-access"
+}
+
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
@@ -35,22 +39,15 @@ module "lb_sg" {
   source = "./modules/security-groups"
   name   = "lb-sg"
   vpc_id = module.vpc.vpc_id
-  ingress_rules = [
-    {
-      description     = "HTTP Traffic"
-      from_port       = 80
-      to_port         = 80
-      protocol        = "tcp"
-      security_groups = []
-      cidr_blocks     = ["0.0.0.0/0"]
-    },
+  ingress_rules = [    
     {
       description     = "HTTPS Traffic"
       from_port       = 443
       to_port         = 443
       protocol        = "tcp"
+      prefix_list_ids = [data.aws_ec2_managed_prefix_list.verified_access.id]
       security_groups = []
-      cidr_blocks     = ["0.0.0.0/0"]
+      cidr_blocks     = []
     }
   ]
   egress_rules = [
@@ -117,17 +114,41 @@ resource "aws_iam_instance_profile" "iam_instance_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 # Instance template
 module "launch_template" {
   source                               = "./modules/launch-template"
   name                                 = "launch_template"
   description                          = "launch_template"
-  ebs_optimized                        = false
-  image_id                             = "ami-005fc0f236362e99f"
-  instance_type                        = "t2.micro"
-  instance_initiated_shutdown_behavior = "stop"
+  ebs_optimized                        = true
+  image_id                             = data.aws_ami.amazon_linux.id
+  instance_type                        = "t3.small"
+  instance_initiated_shutdown_behavior = "terminate"
   instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
-  key_name                             = "madmaxkeypair"
   network_interfaces = [
     {
       associate_public_ip_address = false
@@ -150,7 +171,19 @@ module "asg" {
   target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
-  launch_template_version   = "$Latest"
+  launch_template_version   = "$Default"
+}
+
+resource "aws_autoscaling_policy" "cpu_scale_out" {
+  name                   = "cpu-scale-out"
+  autoscaling_group_name = module.asg.name
+  policy_type            = "TargetTrackingScaling"
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = 60.0
+  }
 }
 
 # -------------------------------------------------------------------------------
@@ -231,6 +264,16 @@ module "lb" {
     lb_http_listener = {
       port     = 80
       protocol = "HTTP"
+      redirect = {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+    lb_https_listener = {
+      port            = 443
+      protocol        = "HTTPS"
+      certificate_arn = module.acm_certificate.certificate_arn
       forward = {
         target_group_key = "lb_target_group"
       }
@@ -301,12 +344,35 @@ module "verified_access" {
   endpoint_domain_prefix               = "secure"
   endpoint_type                        = "load-balancer"
   load_balancer_arn                    = module.lb.arn
-  load_balancer_port                   = 80
-  load_balancer_protocol               = "http"
+  load_balancer_port                   = 443
+  load_balancer_protocol               = "https"
   subnet_ids                           = module.vpc.private_subnets
   security_group_ids                   = [module.lb_sg.id]
   tags = {
     Project = "verified-access"
+  }
+}
+
+module "verified_access_log_group" {
+  source = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name              = "/aws/verified-access/${var.instance_name}"
+  skip_destroy = false
+  retention_in_days = 90
+}
+
+resource "aws_verifiedaccess_instance_logging_configuration" "logging_configuration" {
+  verifiedaccess_instance_id = aws_verifiedaccess_instance.this.id
+
+  access_logs {
+    cloudwatch_logs {
+      enabled   = true
+      log_group = module.verified_access_log_group.name
+    }
+    s3 {
+      enabled     = true
+      bucket_name = module.lb_logs.bucket
+      prefix      = "verified-access/"
+    }
   }
 }
 
