@@ -48,3 +48,19 @@ resource "aws_verifiedaccess_endpoint" "endpoint" {
 
   tags = var.tags
 }
+
+resource "aws_verifiedaccess_instance_logging_configuration" "logging_configuration" {
+  verifiedaccess_instance_id = aws_verifiedaccess_instance.instance.id
+
+  access_logs {
+    cloudwatch_logs {
+      enabled   = var.cloudwatch_logs_enabled
+      log_group = var.cloudwatch_log_group_name
+    }
+    s3 {
+      enabled     = var.s3_logs_enabled
+      bucket_name = var.s3_log_bucket_name
+      prefix      = var.s3_log_bucket_prefix
+    }
+  }
+}

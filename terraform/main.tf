@@ -9,10 +9,6 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
-data "aws_ec2_managed_prefix_list" "verified_access" {
-  name = "com.amazonaws.${var.region}.verified-access"
-}
-
 # -----------------------------------------------------------------------------------------
 # VPC Configuration
 # -----------------------------------------------------------------------------------------
@@ -39,15 +35,15 @@ module "lb_sg" {
   source = "./modules/security-groups"
   name   = "lb-sg"
   vpc_id = module.vpc.vpc_id
-  ingress_rules = [    
+  ingress_rules = [
     {
       description     = "HTTPS Traffic"
-      from_port       = 443
-      to_port         = 443
+      from_port       = 80
+      to_port         = 80
       protocol        = "tcp"
-      prefix_list_ids = [data.aws_ec2_managed_prefix_list.verified_access.id]
-      security_groups = []
-      cidr_blocks     = []
+      cidr_blocks     = ["0.0.0.0/0"]
+      prefix_list_ids = []
+      security_groups = [] # ensure this is truly empty, not null
     }
   ]
   egress_rules = [
@@ -75,6 +71,7 @@ module "asg_sg" {
       to_port         = 80
       protocol        = "tcp"
       security_groups = [module.lb_sg.id]
+      prefix_list_ids = []
       cidr_blocks     = []
     }
   ]
@@ -124,13 +121,13 @@ resource "aws_iam_role_policy_attachment" "cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
-data "aws_ami" "amazon_linux" {
+data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["099720109477"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
 
   filter {
@@ -145,7 +142,7 @@ module "launch_template" {
   name                                 = "launch_template"
   description                          = "launch_template"
   ebs_optimized                        = true
-  image_id                             = data.aws_ami.amazon_linux.id
+  image_id                             = data.aws_ami.ubuntu.id
   instance_type                        = "t3.small"
   instance_initiated_shutdown_behavior = "terminate"
   instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
@@ -264,20 +261,23 @@ module "lb" {
     lb_http_listener = {
       port     = 80
       protocol = "HTTP"
-      redirect = {
-        port        = "443"
-        protocol    = "HTTPS"
-        status_code = "HTTP_301"
-      }
-    }
-    lb_https_listener = {
-      port            = 443
-      protocol        = "HTTPS"
-      certificate_arn = module.acm_certificate.certificate_arn
+      # redirect = {
+      #   port        = "443"
+      #   protocol    = "HTTPS"
+      #   status_code = "HTTP_301"
+      # }
       forward = {
         target_group_key = "lb_target_group"
       }
     }
+    # lb_https_listener = {
+    #   port            = 443
+    #   protocol        = "HTTPS"
+    #   certificate_arn = module.acm_certificate.certificate_arn
+    #   forward = {
+    #     target_group_key = "lb_target_group"
+    #   }
+    # }
   }
   target_groups = {
     lb_target_group = {
@@ -321,6 +321,37 @@ module "acm_certificate" {
 # -------------------------------------------------------------------------------
 # AWS Verified Access
 # -------------------------------------------------------------------------------
+module "verified_access_logs_bucket" {
+  source        = "./modules/s3"
+  bucket_name   = "verified-access-logs-bucket-${random_id.id.hex}"
+  region        = var.region
+  objects       = []
+  bucket_policy = ""
+  cors = [
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["GET"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    },
+    {
+      allowed_headers = ["*"]
+      allowed_methods = ["PUT"]
+      allowed_origins = ["*"]
+      max_age_seconds = 3000
+    }
+  ]
+  versioning_enabled = "Enabled"
+  force_destroy      = true
+}
+
+module "verified_access_log_group" {
+  source            = "./modules/cloudwatch/cloudwatch-log-group"
+  log_group_name    = "/aws/verified-access/${var.instance_name}"
+  skip_destroy      = false
+  retention_in_days = 90
+}
+
 module "verified_access" {
   source                               = "./modules/verified-access"
   instance_name                        = var.instance_name
@@ -344,35 +375,20 @@ module "verified_access" {
   endpoint_domain_prefix               = "secure"
   endpoint_type                        = "load-balancer"
   load_balancer_arn                    = module.lb.arn
-  load_balancer_port                   = 443
-  load_balancer_protocol               = "https"
+  load_balancer_port                   = 80
+  load_balancer_protocol               = "http"
   subnet_ids                           = module.vpc.private_subnets
   security_group_ids                   = [module.lb_sg.id]
+
+  cloudwatch_logs_enabled   = true
+  cloudwatch_log_group_name = module.verified_access_log_group.name
+
+  # Logging - S3
+  s3_logs_enabled      = true
+  s3_log_bucket_name   = module.verified_access_logs_bucket.bucket
+  s3_log_bucket_prefix = "/"
   tags = {
     Project = "verified-access"
-  }
-}
-
-module "verified_access_log_group" {
-  source = "./modules/cloudwatch/cloudwatch-log-group"
-  log_group_name              = "/aws/verified-access/${var.instance_name}"
-  skip_destroy = false
-  retention_in_days = 90
-}
-
-resource "aws_verifiedaccess_instance_logging_configuration" "logging_configuration" {
-  verifiedaccess_instance_id = aws_verifiedaccess_instance.this.id
-
-  access_logs {
-    cloudwatch_logs {
-      enabled   = true
-      log_group = module.verified_access_log_group.name
-    }
-    s3 {
-      enabled     = true
-      bucket_name = module.lb_logs.bucket
-      prefix      = "verified-access/"
-    }
   }
 }
 

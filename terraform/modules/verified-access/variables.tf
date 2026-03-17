@@ -105,3 +105,33 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "cloudwatch_logs_enabled" {
+  description = "Whether to enable CloudWatch logging for Verified Access"
+  type        = bool
+  default     = false
+}
+
+variable "cloudwatch_log_group_name" {
+  description = "Name of the CloudWatch log group for Verified Access logs"
+  type        = string
+  default     = null
+}
+
+variable "s3_logs_enabled" {
+  description = "Whether to enable S3 logging for Verified Access"
+  type        = bool
+  default     = false
+}
+
+variable "s3_log_bucket_name" {
+  description = "Name of the S3 bucket for Verified Access logs"
+  type        = string
+  default     = null
+}
+
+variable "s3_log_bucket_prefix" {
+  description = "S3 key prefix for Verified Access logs"
+  type        = string
+  default     = "verified-access/"
+}
