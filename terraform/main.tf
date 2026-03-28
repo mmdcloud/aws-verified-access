@@ -43,7 +43,7 @@ module "lb_sg" {
       protocol        = "tcp"
       cidr_blocks     = ["0.0.0.0/0"]
       prefix_list_ids = []
-      security_groups = [] # ensure this is truly empty, not null
+      security_groups = []
     }
   ]
   egress_rules = [
