@@ -1,8 +1,12 @@
-data "aws_elb_service_account" "elb_service_account" {}
-
 resource "random_id" "id" {
   byte_length = 8
 }
+
+locals {
+  lb_logs_bucket_name = "lb-logs-${random_id.id.hex}"
+}
+
+data "aws_elb_service_account" "elb_service_account" {}
 
 data "aws_route53_zone" "main" {
   name         = var.domain_name
@@ -217,7 +221,7 @@ resource "aws_autoscaling_policy" "cpu_scale_out" {
 # -------------------------------------------------------------------------------
 module "lb_logs" {
   source      = "./modules/s3"
-  bucket_name = "lb-logs-${random_id.id.hex}"
+  bucket_name = local.lb_logs_bucket_name
   region      = var.region
   objects     = []
   bucket_policy = jsonencode({
@@ -230,7 +234,7 @@ module "lb_logs" {
           Service = "logging.s3.amazonaws.com"
         }
         Action   = "s3:PutObject"
-        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}/*"
+        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}/*"
       },
       {
         Sid    = "AWSLogDeliveryAclCheck"
@@ -239,7 +243,7 @@ module "lb_logs" {
           Service = "logging.s3.amazonaws.com"
         }
         Action   = "s3:GetBucketAcl"
-        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}"
+        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}"
       },
       {
         Sid    = "AWSELBAccountWrite"
@@ -248,11 +252,11 @@ module "lb_logs" {
           AWS = "arn:aws:iam::${data.aws_elb_service_account.elb_service_account.id}:root"
         }
         Action   = "s3:PutObject"
-        Resource = "arn:aws:s3:::lb-logs-${random_id.id.hex}/*"
+        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}/*"
       }
     ]
   })
-  cors = []
+  cors               = []
   versioning_enabled = "Enabled"
   force_destroy      = true
 }
