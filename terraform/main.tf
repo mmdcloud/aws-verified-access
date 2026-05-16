@@ -31,19 +31,48 @@ module "vpc" {
   }
 }
 
+module "verified_access_endpoint_sg" {
+  source = "./modules/security-groups"
+  name   = "verified-access-endpoint-sg"
+  vpc_id = module.vpc.vpc_id
+  ingress_rules = [
+    {
+      description     = "HTTPS from internet via Verified Access"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      prefix_list_ids = []
+      security_groups = []
+    }
+  ]
+  egress_rules = [
+    {
+      description = "Allow outbound to ALB"
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = [module.vpc.vpc_cidr_block]
+    }
+  ]
+  tags = {
+    Name = "verified-access-endpoint-sg"
+  }
+}
+
 module "lb_sg" {
   source = "./modules/security-groups"
   name   = "lb-sg"
   vpc_id = module.vpc.vpc_id
   ingress_rules = [
     {
-      description     = "HTTPS Traffic"
+      description     = "HTTP from Verified Access endpoint only"
       from_port       = 80
       to_port         = 80
       protocol        = "tcp"
-      cidr_blocks     = ["0.0.0.0/0"]
+      cidr_blocks     = []
       prefix_list_ids = []
-      security_groups = []
+      security_groups = [module.verified_access_endpoint_sg.id]
     }
   ]
   egress_rules = [
@@ -223,20 +252,7 @@ module "lb_logs" {
       }
     ]
   })
-  cors = [
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["GET"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    },
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["PUT"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    }
-  ]
+  cors = []
   versioning_enabled = "Enabled"
   force_destroy      = true
 }
@@ -378,7 +394,7 @@ module "verified_access" {
   load_balancer_port                   = 80
   load_balancer_protocol               = "http"
   subnet_ids                           = module.vpc.private_subnets
-  security_group_ids                   = [module.lb_sg.id]
+  security_group_ids                   = [module.verified_access_endpoint_sg.id]
 
   cloudwatch_logs_enabled   = true
   cloudwatch_log_group_name = module.verified_access_log_group.name
