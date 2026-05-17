@@ -28,8 +28,8 @@ module "vpc" {
   create_igw              = true
   map_public_ip_on_launch = true
   enable_nat_gateway      = true
-  single_nat_gateway      = false
-  one_nat_gateway_per_az  = true
+  single_nat_gateway      = true # single NAT for cost savings — use one_nat_gateway_per_az = true in production
+  one_nat_gateway_per_az  = false
   tags = {
     Project = "verified-access-vpc"
   }
@@ -197,22 +197,23 @@ module "asg" {
   desired_capacity          = 3
   health_check_grace_period = 300
   health_check_type         = "ELB"
-  force_delete              = true
+  force_delete              = true # Make it false in production
   target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
-  launch_template_version   = "$Default"
+  launch_template_version   = "$Latest"
 }
 
-resource "aws_autoscaling_policy" "cpu_scale_out" {
-  name                   = "cpu-scale-out"
+resource "aws_autoscaling_policy" "cpu_target_tracking" {
+  name                   = "cpu-target-tracking"
   autoscaling_group_name = module.asg.name
   policy_type            = "TargetTrackingScaling"
   target_tracking_configuration {
     predefined_metric_specification {
       predefined_metric_type = "ASGAverageCPUUtilization"
     }
-    target_value = 60.0
+    target_value     = 60.0
+    disable_scale_in = false
   }
 }
 
@@ -257,7 +258,7 @@ module "lb_logs" {
     ]
   })
   cors               = []
-  versioning_enabled = "Enabled"
+  versioning_enabled = "Disabled"
   force_destroy      = true
 }
 
@@ -267,7 +268,7 @@ module "lb" {
   load_balancer_type         = "application"
   vpc_id                     = module.vpc.vpc_id
   subnets                    = module.vpc.private_subnets
-  enable_deletion_protection = false
+  enable_deletion_protection = false # Make it true in production
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
   internal                   = true
@@ -395,9 +396,9 @@ module "verified_access" {
   endpoint_domain_prefix               = "secure"
   endpoint_type                        = "load-balancer"
   load_balancer_arn                    = module.lb.arn
-  load_balancer_port                   = 80
-  load_balancer_protocol               = "http"
-  subnet_ids                           = module.vpc.private_subnets
+  load_balancer_port                   = 443
+  load_balancer_protocol               = "https"
+  subnet_ids                           = module.vpc.public_subnets
   security_group_ids                   = [module.verified_access_endpoint_sg.id]
 
   cloudwatch_logs_enabled   = true
