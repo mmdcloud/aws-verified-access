@@ -206,7 +206,7 @@ module "asg" {
   desired_capacity          = 3
   health_check_grace_period = 300
   health_check_type         = "ELB"
-  force_delete              = true # Make it false in production
+  force_delete              = !var.is_production
   target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
@@ -277,7 +277,7 @@ module "lb" {
   load_balancer_type         = "application"
   vpc_id                     = module.vpc.vpc_id
   subnets                    = module.vpc.private_subnets
-  enable_deletion_protection = false # Make it true in production
+  enable_deletion_protection = var.is_production
   drop_invalid_header_fields = true
   ip_address_type            = "ipv4"
   internal                   = true
