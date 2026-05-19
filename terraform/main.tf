@@ -77,6 +77,15 @@ module "lb_sg" {
       cidr_blocks     = []
       prefix_list_ids = []
       security_groups = [module.verified_access_endpoint_sg.id]
+    },
+    {
+      description     = "HTTPS from Verified Access endpoint"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      cidr_blocks     = []
+      prefix_list_ids = []
+      security_groups = [module.verified_access_endpoint_sg.id]
     }
   ]
   egress_rules = [
@@ -340,11 +349,28 @@ module "acm_certificate" {
 # AWS Verified Access
 # -------------------------------------------------------------------------------
 module "verified_access_logs_bucket" {
-  source             = "./modules/s3"
-  bucket_name        = "verified-access-logs-bucket-${random_id.id.hex}"
-  region             = var.region
-  objects            = []
-  bucket_policy      = ""
+  source      = "./modules/s3"
+  bucket_name = "verified-access-logs-bucket-${random_id.id.hex}"
+  region      = var.region
+  objects     = []
+  bucket_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyUnencryptedTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          "arn:aws:s3:::verified-access-logs-bucket-${random_id.id.hex}",
+          "arn:aws:s3:::verified-access-logs-bucket-${random_id.id.hex}/*"
+        ]
+        Condition = {
+          Bool = { "aws:SecureTransport" = "false" }
+        }
+      }
+    ]
+  })
   cors               = []
   versioning_enabled = "Disabled"
   force_destroy      = true
