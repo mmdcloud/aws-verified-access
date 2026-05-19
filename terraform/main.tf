@@ -201,7 +201,7 @@ module "asg" {
   target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
-  launch_template_version   = "$Latest"
+  launch_template_version   = "$Default"
 }
 
 resource "aws_autoscaling_policy" "cpu_target_tracking" {
@@ -282,23 +282,20 @@ module "lb" {
     lb_http_listener = {
       port     = 80
       protocol = "HTTP"
-      # redirect = {
-      #   port        = "443"
-      #   protocol    = "HTTPS"
-      #   status_code = "HTTP_301"
-      # }
+      redirect = {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+    lb_https_listener = {
+      port            = 443
+      protocol        = "HTTPS"
+      certificate_arn = module.acm_certificate.certificate_arn
       forward = {
         target_group_key = "lb_target_group"
       }
     }
-    # lb_https_listener = {
-    #   port            = 443
-    #   protocol        = "HTTPS"
-    #   certificate_arn = module.acm_certificate.certificate_arn
-    #   forward = {
-    #     target_group_key = "lb_target_group"
-    #   }
-    # }
   }
   target_groups = {
     lb_target_group = {
@@ -343,26 +340,13 @@ module "acm_certificate" {
 # AWS Verified Access
 # -------------------------------------------------------------------------------
 module "verified_access_logs_bucket" {
-  source        = "./modules/s3"
-  bucket_name   = "verified-access-logs-bucket-${random_id.id.hex}"
-  region        = var.region
-  objects       = []
-  bucket_policy = ""
-  cors = [
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["GET"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    },
-    {
-      allowed_headers = ["*"]
-      allowed_methods = ["PUT"]
-      allowed_origins = ["*"]
-      max_age_seconds = 3000
-    }
-  ]
-  versioning_enabled = "Enabled"
+  source             = "./modules/s3"
+  bucket_name        = "verified-access-logs-bucket-${random_id.id.hex}"
+  region             = var.region
+  objects            = []
+  bucket_policy      = ""
+  cors               = []
+  versioning_enabled = "Disabled"
   force_destroy      = true
 }
 
@@ -386,7 +370,7 @@ module "verified_access" {
     permit(principal, action, resource)
     when {
       context.trustprovider.user.email.verified == true &&
-      context.trustprovider.user.email.address like "*@*"
+      context.trustprovider.user.email.address like "*@mohitcloud.xyz"
     };
   EOT
   application_domain                   = "secure.${var.domain_name}"
