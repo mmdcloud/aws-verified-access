@@ -201,9 +201,9 @@ module "launch_template" {
 module "asg" {
   source                    = "./modules/auto-scaling-group"
   name                      = "asg"
-  min_size                  = 3
-  max_size                  = 50
-  desired_capacity          = 3
+  min_size                  = 2
+  max_size                  = 10
+  desired_capacity          = 2
   health_check_grace_period = 300
   health_check_type         = "ELB"
   force_delete              = !var.is_production
