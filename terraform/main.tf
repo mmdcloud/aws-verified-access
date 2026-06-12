@@ -185,7 +185,7 @@ module "launch_template" {
   description                          = "launch_template"
   ebs_optimized                        = true
   image_id                             = data.aws_ami.ubuntu.id
-  instance_type                        = "t3.small"
+  instance_type                        = var.instance_type
   instance_initiated_shutdown_behavior = "terminate"
   instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
   network_interfaces = [
@@ -396,7 +396,7 @@ module "verified_access" {
     permit(principal, action, resource)
     when {
       context.trustprovider.user.email.verified == true &&
-      context.trustprovider.user.email.address like "*@mohitcloud.xyz"
+      context.trustprovider.user.email.address like "*@${var.domain_name}"
     };
   EOT
   application_domain                   = "secure.${var.domain_name}"

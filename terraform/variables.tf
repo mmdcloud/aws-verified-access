@@ -37,3 +37,8 @@ variable "is_production" {
   description = "Set to true for production — enables deletion protection and disables force_delete"
   default     = false
 }
+
+variable "instance_type" {
+  type        = string
+  default     = ""
+}
