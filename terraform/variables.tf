@@ -40,5 +40,5 @@ variable "is_production" {
 
 variable "instance_type" {
   type        = string
-  default     = ""
+  default     = "t3.small"
 }
