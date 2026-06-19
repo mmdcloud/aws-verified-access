@@ -201,9 +201,9 @@ module "launch_template" {
 module "asg" {
   source                    = "./modules/auto-scaling-group"
   name                      = "asg"
-  min_size                  = 2
-  max_size                  = 10
-  desired_capacity          = 2
+  min_size                  = var.min_size
+  max_size                  = var.max_size
+  desired_capacity          = var.desired_capacity
   health_check_grace_period = 300
   health_check_type         = "ELB"
   force_delete              = !var.is_production
@@ -352,7 +352,12 @@ module "verified_access_logs_bucket" {
   source      = "./modules/s3"
   bucket_name = "verified-access-logs-bucket-${random_id.id.hex}"
   region      = var.region
-  objects     = []
+  objects     = [
+    {
+      key = "verified-access-logs/"
+      source = ""
+    }
+  ]
   bucket_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -417,7 +422,7 @@ module "verified_access" {
   # Logging - S3
   s3_logs_enabled      = true
   s3_log_bucket_name   = module.verified_access_logs_bucket.bucket
-  s3_log_bucket_prefix = "/"
+  s3_log_bucket_prefix = "verified-access-logs/"
   tags = {
     Project = "verified-access"
   }

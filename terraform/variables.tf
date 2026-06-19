@@ -41,4 +41,8 @@ variable "is_production" {
 variable "instance_type" {
   type        = string
   default     = "t3.small"
+  description = "EC2 instance type for the ASG launch template" 
 }
+variable "min_size"{}
+variable "max_size"{}
+variable "desired_capacity"{}
