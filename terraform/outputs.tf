@@ -9,6 +9,6 @@ output "alb_dns_name" {
 }
 
 output "certificate_arn" {
-  description = "SSL/TLS Certificate name" 
+  description = "ARN of the SSL/TLS Certificate" 
   value = module.acm_certificate.certificate_arn
 }

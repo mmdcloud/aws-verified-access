@@ -135,7 +135,7 @@ module "asg_sg" {
 # Auto Scaling Group
 # -------------------------------------------------------------------------------
 resource "aws_iam_role" "ec2_role" {
-  name = "ec2-role"
+  name = var.ec2_role
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -149,7 +149,7 @@ resource "aws_iam_role" "ec2_role" {
 }
 
 resource "aws_iam_instance_profile" "iam_instance_profile" {
-  name = "ec2-instance-profile"
+  name = "${var.ec2_role}-instance-profile"
   role = aws_iam_role.ec2_role.name
 }
 
@@ -210,7 +210,7 @@ module "asg" {
   target_group_arns         = [module.lb.target_groups.lb_target_group.arn]
   vpc_zone_identifier       = module.vpc.private_subnets
   launch_template_id        = module.launch_template.id
-  launch_template_version   = "$Default"
+  launch_template_version   = "$Latest"
 }
 
 resource "aws_autoscaling_policy" "cpu_target_tracking" {
@@ -238,31 +238,13 @@ module "lb_logs" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "AWSLogDeliveryWrite"
-        Effect = "Allow"
-        Principal = {
-          Service = "logging.s3.amazonaws.com"
-        }
-        Action   = "s3:PutObject"
-        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}/*"
-      },
-      {
-        Sid    = "AWSLogDeliveryAclCheck"
-        Effect = "Allow"
-        Principal = {
-          Service = "logging.s3.amazonaws.com"
-        }
-        Action   = "s3:GetBucketAcl"
-        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}"
-      },
-      {
         Sid    = "AWSELBAccountWrite"
         Effect = "Allow"
         Principal = {
           AWS = "arn:aws:iam::${data.aws_elb_service_account.elb_service_account.id}:root"
         }
         Action   = "s3:PutObject"
-        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}/*"
+        Resource = "arn:aws:s3:::${local.lb_logs_bucket_name}/AWSLogs/*"
       }
     ]
   })
@@ -352,9 +334,9 @@ module "verified_access_logs_bucket" {
   source      = "./modules/s3"
   bucket_name = "verified-access-logs-bucket-${random_id.id.hex}"
   region      = var.region
-  objects     = [
+  objects = [
     {
-      key = "verified-access-logs/"
+      key    = "verified-access-logs/"
       source = ""
     }
   ]
@@ -367,8 +349,8 @@ module "verified_access_logs_bucket" {
         Principal = "*"
         Action    = "s3:*"
         Resource = [
-          "arn:aws:s3:::verified-access-logs-bucket-${random_id.id.hex}",
-          "arn:aws:s3:::verified-access-logs-bucket-${random_id.id.hex}/*"
+          "arn:aws:s3:::${module.verified_access_logs_bucket.bucket}",
+          "arn:aws:s3:::${module.verified_access_logs_bucket.bucket}/*"
         ]
         Condition = {
           Bool = { "aws:SecureTransport" = "false" }
@@ -385,7 +367,7 @@ module "verified_access_log_group" {
   source            = "./modules/cloudwatch/cloudwatch-log-group"
   log_group_name    = "/aws/verified-access/${var.instance_name}"
   skip_destroy      = false
-  retention_in_days = 90
+  retention_in_days = var.retention_in_days
 }
 
 module "verified_access" {
