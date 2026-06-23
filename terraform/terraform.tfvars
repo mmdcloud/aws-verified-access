@@ -9,3 +9,4 @@ min_size          = 2
 max_size          = 10
 desired_capacity  = 2
 retention_in_days = 90
+ec2_role          = "verified-access-ec2-role"

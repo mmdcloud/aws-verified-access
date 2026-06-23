@@ -4,11 +4,11 @@ output "verified_access_endpoint" {
 }
 
 output "alb_dns_name" {
-  description = "Internal ALB DNS name" 
-  value = module.lb.dns_name
+  description = "Internal ALB DNS name"
+  value       = module.lb.dns_name
 }
 
 output "certificate_arn" {
-  description = "ARN of the SSL/TLS Certificate" 
-  value = module.acm_certificate.certificate_arn
+  description = "ARN of the SSL/TLS Certificate"
+  value       = module.acm_certificate.certificate_arn
 }

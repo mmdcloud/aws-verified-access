@@ -63,6 +63,10 @@ variable "desired_capacity" {
   type        = number
   default     = 1
   description = "Desired capacity for the ASG launch template"
+  validation {
+    condition     = var.desired_capacity >= var.min_size && var.desired_capacity <= var.max_size
+    error_message = "desired_capacity must be between min_size and max_size"
+  }
 }
 
 variable "retention_in_days" {

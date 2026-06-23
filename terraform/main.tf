@@ -57,6 +57,13 @@ module "verified_access_endpoint_sg" {
       to_port     = 80
       protocol    = "tcp"
       cidr_blocks = [module.vpc.vpc_cidr_block]
+    },
+    {
+      description = "Allow outbound to ALB"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = [module.vpc.vpc_cidr_block]
     }
   ]
   tags = {
