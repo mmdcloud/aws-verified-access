@@ -52,18 +52,22 @@ module "verified_access_endpoint_sg" {
   ]
   egress_rules = [
     {
-      description = "Allow outbound to ALB"
-      from_port   = 80
-      to_port     = 80
-      protocol    = "tcp"
-      cidr_blocks = [module.vpc.vpc_cidr_block]
+      description     = "Allow HTTPS outbound to internal ALB in private subnets"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      cidr_blocks     = var.private_subnets
+      security_groups = []
+      prefix_list_ids = []
     },
     {
-      description = "Allow outbound to ALB"
-      from_port   = 443
-      to_port     = 443
-      protocol    = "tcp"
-      cidr_blocks = [module.vpc.vpc_cidr_block]
+      description     = "Allow HTTP outbound to internal ALB in private subnets"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      cidr_blocks     = var.private_subnets
+      security_groups = []
+      prefix_list_ids = []
     }
   ]
   tags = {
@@ -97,11 +101,13 @@ module "lb_sg" {
   ]
   egress_rules = [
     {
-      description = "Allow all outbound traffic"
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
+      description     = "Allow outbound HTTP traffic to ASG targets in private subnets"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      cidr_blocks     = var.private_subnets
+      security_groups = []
+      prefix_list_ids = []
     }
   ]
   tags = {
@@ -126,11 +132,40 @@ module "asg_sg" {
   ]
   egress_rules = [
     {
-      description = "Allow all outbound traffic"
-      from_port   = 0
-      to_port     = 0
-      protocol    = "-1"
-      cidr_blocks = ["0.0.0.0/0"]
+      description     = "Allow outbound HTTPS for OS packages, NodeSource, GitHub, npm, and AWS APIs"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+      prefix_list_ids = []
+    },
+    {
+      description     = "Allow outbound HTTP for Ubuntu package repositories"
+      from_port       = 80
+      to_port         = 80
+      protocol        = "tcp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+      prefix_list_ids = []
+    },
+    {
+      description     = "Allow outbound DNS resolution over UDP"
+      from_port       = 53
+      to_port         = 53
+      protocol        = "udp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+      prefix_list_ids = []
+    },
+    {
+      description     = "Allow outbound DNS resolution over TCP"
+      from_port       = 53
+      to_port         = 53
+      protocol        = "tcp"
+      cidr_blocks     = ["0.0.0.0/0"]
+      security_groups = []
+      prefix_list_ids = []
     }
   ]
   tags = {
@@ -195,12 +230,21 @@ module "launch_template" {
   instance_type                        = var.instance_type
   instance_initiated_shutdown_behavior = "terminate"
   instance_profile_name                = aws_iam_instance_profile.iam_instance_profile.name
+
   network_interfaces = [
     {
       associate_public_ip_address = false
       security_groups             = [module.asg_sg.id]
     }
   ]
+
+  metadata_options = {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # Enforces IMDSv2
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "enabled"
+  }
+
   user_data = base64encode(templatefile("${path.module}/scripts/user_data.sh", {}))
 }
 
@@ -351,16 +395,17 @@ module "verified_access_logs_bucket" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "DenyUnencryptedTransport"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          "arn:aws:s3:::${module.verified_access_logs_bucket.bucket}",
-          "arn:aws:s3:::${module.verified_access_logs_bucket.bucket}/*"
-        ]
+        Sid    = "AWSLogDeliveryWrite"
+        Effect = "Allow"
+        Principal = {
+          Service = "delivery.logs.amazonaws.com"
+        }
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::${module.verified_access_logs_bucket.bucket}/*"
         Condition = {
-          Bool = { "aws:SecureTransport" = "false" }
+          StringEquals = {
+            "s3:x-amz-acl" = "bucket-owner-full-control"
+          }
         }
       }
     ]

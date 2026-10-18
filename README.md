@@ -332,23 +332,35 @@ auto_scaling_group_name = "asg"
 
 ### Security Group Rules
 
-#### Load Balancer Security Group
-```hcl
+#### 1. Verified Access Endpoint Security Group
+```yaml
 Ingress:
-  - Port 80 (HTTP) from 0.0.0.0/0
-  - Port 443 (HTTPS) from 0.0.0.0/0
+  - Port 443 (HTTPS) from 0.0.0.0/0 (client traffic via Verified Access)
 
 Egress:
-  - All traffic allowed
+  - Port 443 (HTTPS) to Private Subnets only (internal ALB)
+  - Port 80 (HTTP) to Private Subnets only (internal ALB)
 ```
 
-#### Auto Scaling Group Security Group
-```hcl
+#### 2. Load Balancer Security Group (Internal ALB)
+```yaml
+Ingress:
+  - Port 443 (HTTPS) from Verified Access Endpoint Security Group only
+  - Port 80 (HTTP) from Verified Access Endpoint Security Group only
+
+Egress:
+  - Port 80 (HTTP) to Private Subnets only (Auto Scaling Group instances)
+```
+
+#### 3. Auto Scaling Group Security Group (EC2 Instances)
+```yaml
 Ingress:
   - Port 80 (HTTP) from Load Balancer Security Group only
 
 Egress:
-  - All traffic allowed
+  - Port 443 (HTTPS) to 0.0.0.0/0 (OS updates, NodeSource, GitHub, npm, AWS SSM, CloudWatch)
+  - Port 80 (HTTP) to 0.0.0.0/0 (Ubuntu mirror package repositories)
+  - Port 53 (UDP & TCP) to 0.0.0.0/0 (DNS resolution)
 ```
 
 ### Secrets Management
