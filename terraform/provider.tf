@@ -11,13 +11,13 @@ terraform {
     }
   }
 
-  backend "s3" {
-    bucket       = "verifiedaccesstfstate"
-    key          = "terraform.tfstate"
-    region       = var.region
-    use_lockfile = true
-    encrypt      = true
-  }
+  # backend "s3" {
+  #   bucket       = "verifiedaccesstfstate"
+  #   key          = "terraform.tfstate"
+  #   region       = "us-east-1"
+  #   use_lockfile = true
+  #   encrypt      = true
+  # }
 }
 
 # Configure the AWS Provider
